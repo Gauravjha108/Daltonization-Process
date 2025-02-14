@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Enhancer for Colorblind Users</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 Image Enhancer for Colorblind Users</h1>
+        <p>Upload an image or video and apply different color filters for colorblind vision.</p>
+        
+        <label class="custom-file-upload">
+            <input type="file" id="upload" accept="image/*, video/*">
+            📂 Upload Image/Video
+        </label>
+
+        <div class="media-container">
+            <canvas id="canvas"></canvas>
+            <video id="video" controls style="display: none;"></video>
+        </div>
+
+        <div class="button-group" id="button-group">
+            <button onclick="applyMode('protanopia')">Protanopia</button>
+            <button onclick="applyMode('deuteranopia')">Deuteranopia</button>
+            <button onclick="applyMode('tritanopia')">Tritanopia</button>
+            <button onclick="applyMode('protanomaly')">Protanomaly</button>
+            <button onclick="applyMode('deuteranomaly')">Deuteranomaly</button>
+            <button onclick="applyMode('tritanomaly')">Tritanomaly</button>
+            <button onclick="applyMode('Grayscale')">Grayscale</button>
+        </div>
+
+        <div class="action-buttons">
+            <button class="download-btn" onclick="downloadMedia()">📥 Download Media</button>
+            <button class="reset-btn" onclick="reset()">🔄 Reset</button>
+        </div>
+    </div>
+
+    
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.0/dist/ffmpeg.min.js"></script>
+    <script>
+        const upload = document.getElementById('upload');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('video');
+        const buttonGroup = document.getElementById('button-group');
+        let originalImageData = null;
+        let currentMode = null;
+        let isVideo = false;
+        let frames = []; 
+        let ffmpeg = null;
+
+        
+        async function initFFmpeg() {
+            const { createFFmpeg } = FFmpeg;
+            ffmpeg = createFFmpeg({ log: true });
+            await ffmpeg.load();
+        }
+
+        upload.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                if (file.type.startsWith('image/')) {
+                    isVideo = false;
+                    video.style.display = 'none';
+                    canvas.style.display = 'block';
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const img = new Image();
+                        img.onload = function() {
+                            canvas.width = img.width / 2;
+                            canvas.height = img.height / 2;
+                            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                            originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                        }
+                        img.src = e.target.result;
+                    }
+                    reader.readAsDataURL(file);
+                } else if (file.type.startsWith('video/')) {
+                    isVideo = true;
+                    canvas.style.display = 'block';
+                    video.style.display = 'none';
+                    video.src = URL.createObjectURL(file);
+                    video.play();
+
+                    video.addEventListener('play', () => {
+                        processVideo();
+                    });
+                }
+            }
+        });
+
+        function processVideo() {
+            if (isVideo) {
+                const processFrame = () => {
+                    if (video.paused || video.ended) return;
+
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    applyMode(currentMode, true);
+
+                    
+                    const frame = canvas.toDataURL('image/png');
+                    frames.push(frame);
+
+                    requestAnimationFrame(processFrame);
+                };
+
+                processFrame();
+            }
+        }
+
+        function applyMode(mode, isVideoFrame = false) {
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+
+            for (let i = 0; i < data.length; i += 4) {
+                let r = data[i], g = data[i + 1], b = data[i + 2];
+                let newR = r, newG = g, newB = b;
+
+                switch(mode) {
+                    case 'protanopia':
+                        newR = g * 0.5 + b * 0.5;
+                        break;
+                    case 'deuteranopia':
+                        newG = r * 0.5 + b * 0.5;
+                        break;
+                    case 'tritanopia':
+                        newB = r * 0.5 + g * 0.5;
+                        break;
+                    case 'protanomaly':
+                        newR = r * 0.8 + g * 0.2;
+                        break;
+                    case 'deuteranomaly':
+                        newG = g * 0.8 + r * 0.2;
+                        break;
+                    case 'tritanomaly':
+                        newB = b * 0.8 + g * 0.2;
+                        break;
+                    case 'achromatopsia':
+                        let avg = (r + g + b) / 3;
+                        newR = newG = newB = avg;
+                        break;
+                }
+
+                data[i] = Math.min(255, Math.max(0, newR));
+                data[i + 1] = Math.min(255, Math.max(0, newG));
+                data[i + 2] = Math.min(255, Math.max(0, newB));
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+
+            if (!isVideoFrame) {
+                currentMode = mode;
+                buttonGroup.innerHTML = `<button class="selected-btn" onclick="resetButtons()">${mode}</button>`;
+            }
+        }
+
+        function resetButtons() {
+            buttonGroup.innerHTML = `
+                <button onclick="applyMode('protanopia')">Protanopia</button>
+                <button onclick="applyMode('deuteranopia')">Deuteranopia</button>
+                <button onclick="applyMode('tritanopia')">Tritanopia</button>
+                <button onclick="applyMode('protanomaly')">Protanomaly</button>
+                <button onclick="applyMode('deuteranomaly')">Deuteranomaly</button>
+                <button onclick="applyMode('tritanomaly')">Tritanomaly</button>
+                <button onclick="applyMode('achromatopsia')">Grayscale</button>
+            `;
+        }
+
+        function reset() {
+            if (isVideo) {
+                video.pause();
+                video.currentTime = 0;
+                video.play();
+                frames = []; 
+            } else if (originalImageData) {
+                ctx.putImageData(originalImageData, 0, 0);
+            }
+            resetButtons();
+        }
+
+        async function downloadMedia() {
+            if (isVideo) {
+                if (frames.length === 0) {
+                    alert('No frames to download. Please process the video first.');
+                    return;
+                }
+
+                
+                if (!ffmpeg) {
+                    await initFFmpeg();
+                }
+
+                
+                const outputFileName = 'output.mp4';
+                await ffmpeg.write('input.mp4', await fetchFile(video.src));
+                await ffmpeg.run('-i', 'input.mp4', '-vf', 'fps=30', outputFileName);
+
+                
+                const data = ffmpeg.read(outputFileName);
+                const url = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = 'processed-video.mp4';
+                link.click();
+            } else {
+                const link = document.createElement('a');
+                link.download = 'colorblind-enhanced-image.png';
+                link.href = canvas.toDataURL();
+                link.click();
+            }
+        }
+
+        
+        async function fetchFile(url) {
+            const response = await fetch(url);
+            return await response.arrayBuffer();
+        }
+    </script>
+     <div id="modes">
+        <h3>Types of Colour-Blindness</h3>
+        <ul>
+            <li><strong>Protanopia:</strong> No red cone cells; reds appear dark or as shades of brown/green.</li>
+            <li><strong>Protanomaly:</strong> Reduced sensitivity to red light; reds appear more greenish and less bright.</li>
+            <li><strong>Deuteranopia:</strong> No green cone cells; greens appear beige or brown, and reds may appear as yellow.</li>
+            <li><strong>Deuteranomaly:</strong> Reduced sensitivity to green light; greens appear more reddish and less vivid.</li>
+            <li><strong>Tritanopia:</strong> No blue cone cells; blue appears green, and yellow appears violet or gray.</li>
+            <li><strong>Tritanomaly:</strong> Reduced sensitivity to blue light; blue appears greener, and it’s hard to differentiate yellow from red/pink.</li>
+            <li><strong>Achromatopsia:</strong> No functioning cone cells; vision is entirely in black, white, and gray with light sensitivity and poor visual acuity.
+            </li>
+        </ul>
+    </div>
+    <div class="mode-description">
+        <h3>Modes Description</h3>
+        <ul>
+            <li><strong>Protanopia Mode:</strong> Enhances contrast between red and green hues for red color blindness.
+            </li>
+            <li><strong>Deuteranopia Mode:</strong> Enhances color differences between red and green for green color
+                blindness.</li>
+            <li><strong>Tritanopia Mode:</strong> Enhances blue and yellow color perception for blue color blindness.
+            </li>
+            <li><strong>Protanomaly Mode:</strong> Adjusts red hues for mild red color deficiency.</li>
+            <li><strong>Deuteranomaly Mode:</strong> Adjusts green shades for mild green color deficiency.</li>
+            <li><strong>Tritanomaly Mode:</strong> Modifies blue and yellow tones for mild blue-yellow deficiency.</li>
+            <li><strong>Grayscale Mode:</strong> Converts images to black-and-white, aiding those with complete color
+                blindness by emphasizing brightness and contrast.</li>
+        </ul>
+    </div>
+</body>
+</html>
